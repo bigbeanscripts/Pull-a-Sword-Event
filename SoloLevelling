@@ -197,7 +197,7 @@ AutoDungeonToggle._steppedConnection = RunService.Stepped:Connect(function()
                 end
 
                 -- Position is 12 units up if in initial state, otherwise 8 units up
-                local heightOffset = initialTeleport and 15 or 10
+                local heightOffset = initialTeleport and 10 or 10
                 local targetPos = currentNPC.HumanoidRootPart.Position + Vector3.new(0, heightOffset, -0.45)
                 
                 hrp.Velocity = Vector3.zero -- freeze gravity drop
