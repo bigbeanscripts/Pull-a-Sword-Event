@@ -122,93 +122,101 @@ local AutoDungeonToggle = AutoDungeonSection:AddToggle("AutoDungeon", {
     Default = false,
 })
 
-AutoDungeonToggle:OnChanged(function()
-    if AutoDungeonToggle.Value then
-        -- Auto Fight
-        spawn(function()
-            while AutoDungeonToggle.Value do
-                game:GetService("ReplicatedStorage").Remotes.Events.Dungeon.OnDungeonClick:FireServer()
-                wait(0.1)
-            end
-        end)
+local shouldRunDungeon = false -- Shared control flag
 
-        -- Auto Join
-        spawn(function()
-            while AutoDungeonToggle.Value do
+AutoDungeonToggle:OnChanged(function()
+    shouldRunDungeon = AutoDungeonToggle.Value
+
+    if shouldRunDungeon then
+        -- Spawn 20 threads to auto-click dungeon
+        for i = 1, 5 do
+            task.spawn(function()
+                while shouldRunDungeon do
+                    game:GetService("ReplicatedStorage").Remotes.Events.Dungeon.OnDungeonClick:FireServer()
+                    task.wait(0.01)
+                end
+            end)
+        end
+
+        -- Start auto join loop
+        task.spawn(function()
+            while shouldRunDungeon do
                 local difficulty = DifficultyDropdown.Value
                 game:GetService("ReplicatedStorage").Remotes.Events.Dungeon.OnJoinDungeon:FireServer(difficulty)
-                wait(2)
+
+                -- Use fast wait loop to break early
+                for i = 1, 100 do -- 100 * 0.01 = ~1 second
+                    if not shouldRunDungeon then return end
+                    task.wait(0.01)
+                end
             end
         end)
 
--- NPC teleport + lock state
-local currentNPC = nil
-local lastNPCChange = tick()
-local initialTeleport = true -- Flag to track initial teleport
+        -- NPC teleport + lock state
+        local currentNPC = nil
+        local lastNPCChange = tick()
+        local initialTeleport = true
 
-local function checkForNPC()
-    if not AutoDungeonToggle.Value then return end
+        local function checkForNPC()
+            if not shouldRunDungeon then return end
 
-    local difficulty = DifficultyDropdown.Value
-    local targetNPC = workspace.LiveObjects.NPCs:FindFirstChild(difficulty)
-    if not targetNPC then
-        targetNPC = workspace.LiveObjects.NPCs:FindFirstChildOfClass("Model")
-    end
+            local difficulty = DifficultyDropdown.Value
+            local targetNPC = workspace.LiveObjects.NPCs:FindFirstChild(difficulty)
+            if not targetNPC then
+                targetNPC = workspace.LiveObjects.NPCs:FindFirstChildOfClass("Model")
+            end
 
-    if targetNPC and targetNPC:FindFirstChild("HumanoidRootPart") then
-        if targetNPC ~= currentNPC then
-            currentNPC = targetNPC
-            lastNPCChange = tick()
-            initialTeleport = true -- Reset flag for new NPC
+            if targetNPC and targetNPC:FindFirstChild("HumanoidRootPart") then
+                if targetNPC ~= currentNPC then
+                    currentNPC = targetNPC
+                    lastNPCChange = tick()
+                    initialTeleport = true
 
-            task.wait(1)
-            local character = game.Players.LocalPlayer.Character
-            if character then
-                local hrp = character:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    -- Teleport 12 units above the NPC initially
-                    hrp.CFrame = currentNPC.HumanoidRootPart.CFrame + Vector3.new(0, 15, -0.45)
+                    task.wait(1)
+                    local character = game.Players.LocalPlayer.Character
+                    if character then
+                        local hrp = character:FindFirstChild("HumanoidRootPart")
+                        if hrp then
+                            hrp.CFrame = currentNPC.HumanoidRootPart.CFrame + Vector3.new(0, 15, -0.45)
+                        end
+                    end
                 end
             end
         end
-    end
-end
 
--- Initial check
-checkForNPC()
+        checkForNPC()
 
--- React to new NPCs
-local npcAddedConnection = workspace.LiveObjects.NPCs.ChildAdded:Connect(function()
-    checkForNPC()
-end)
-AutoDungeonToggle._connection = npcAddedConnection
+        -- React to new NPCs
+        AutoDungeonToggle._connection = workspace.LiveObjects.NPCs.ChildAdded:Connect(function()
+            checkForNPC()
+        end)
 
--- Lock Y position and handle drop down from 12 to 8
-local dropDelay = 1.5 -- Wait 1 second before dropping down
-AutoDungeonToggle._steppedConnection = RunService.Stepped:Connect(function()
-    if AutoDungeonToggle.Value and currentNPC and currentNPC:FindFirstChild("HumanoidRootPart") then
-        local character = game.Players.LocalPlayer.Character
-        if character then
-            local hrp = character:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                -- If initial teleport and it's been more than dropDelay seconds since NPC change
-                if initialTeleport and (tick() - lastNPCChange > dropDelay) then
-                    initialTeleport = false -- No longer in initial position
+        -- Lock Y position
+        local dropDelay = 1.5
+        AutoDungeonToggle._steppedConnection = game:GetService("RunService").Stepped:Connect(function()
+            if shouldRunDungeon and currentNPC and currentNPC:FindFirstChild("HumanoidRootPart") then
+                local character = game.Players.LocalPlayer.Character
+                if character then
+                    local hrp = character:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        if initialTeleport and (tick() - lastNPCChange > dropDelay) then
+                            initialTeleport = false
+                        end
+
+                        local heightOffset = 1 -- you had 1 either way; can change to 8 if needed
+                        local targetPos = currentNPC.HumanoidRootPart.Position + Vector3.new(0, heightOffset, -0.45)
+
+                        hrp.Velocity = Vector3.zero
+                        hrp.CFrame = CFrame.new(targetPos)
+                    end
                 end
-
-                -- Position is 12 units up if in initial state, otherwise 8 units up
-                local heightOffset = initialTeleport and 10 or 10
-                local targetPos = currentNPC.HumanoidRootPart.Position + Vector3.new(0, heightOffset, -0.45)
-                
-                hrp.Velocity = Vector3.zero -- freeze gravity drop
-                hrp.CFrame = CFrame.new(targetPos)
             end
-        end
-    end
-end)
+        end)
 
     else
         -- Cleanup
+        shouldRunDungeon = false
+
         if AutoDungeonToggle._connection then
             AutoDungeonToggle._connection:Disconnect()
             AutoDungeonToggle._connection = nil
